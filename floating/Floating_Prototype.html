@@ -11,33 +11,34 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Floating Clump</title>
     <style>
-      body { margin: 0; background: #e0707a; overflow: hidden; }
+      body { margin: 0; background: #d2e5f4; overflow: hidden; }
       #info {
+        text-shadow: 0 1px 14px rgba(10,30,70,.45);
         position: fixed;
         left: clamp(24px, 6vw, 120px);
         top: 50%;
         transform: translateY(-50%);
         width: min(420px, 38vw);
-        color: #fff;
+        color: #ffffff;
         opacity: 0;
         pointer-events: none;
         z-index: 5;
         font-family: 'Pretendard', 'Noto Sans KR', sans-serif;
       }
-      #info h2 { margin: 0 0 22px; font-size: clamp(28px, 3.2vw, 52px); font-weight: 800; letter-spacing: -.03em; line-height: 1.2; text-shadow: 0 2px 24px rgba(10,30,90,.35); }
-      #info p { margin: 0; font-size: clamp(14px, 1.15vw, 18px); line-height: 1.8; word-break: keep-all; font-weight: 400; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.5); }
-      #info-eyebrow { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 12px; font-weight: 700; letter-spacing: .22em; }
-      #info-eyebrow i { width: 36px; height: 1px; background: #fff; }
+      #info h2 { color: #ffffff; margin: 0 0 22px; font-size: clamp(28px, 3.2vw, 52px); font-weight: 800; letter-spacing: -.03em; line-height: 1.2;  }
+      #info p { color: #ffffff; margin: 0; font-size: clamp(14px, 1.15vw, 18px); line-height: 1.8; word-break: keep-all; font-weight: 400; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.6); }
+      #info-eyebrow { color: #ffffff; display: flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 12px; font-weight: 700; letter-spacing: .22em; }
+      #info-eyebrow i { width: 36px; height: 1px; background: #ffffff; }
       #info-no { font-size: 14px; letter-spacing: .1em; }
       #info-tags { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
-      #info-tags span { background: #4a1a22; color: #fff; font-size: clamp(14px, 1.2vw, 18px); font-weight: 600; padding: 7px 16px; }
+      #info-tags span { background: #ffffff; text-shadow: none; color: #1b3f7a; font-size: clamp(14px, 1.2vw, 18px); font-weight: 600; padding: 7px 16px; }
       #loading {
         position: fixed;
         inset: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #e0707a;
+        background: #d2e5f4;
         font: 16px sans-serif;
         color: #333;
         z-index: 10;
@@ -81,7 +82,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         const c = document.createElement( 'canvas' ); c.width = 1024; c.height = 1024;
         const x = c.getContext( '2d' );
         const g = x.createRadialGradient( 512, 460, 40, 512, 512, 760 );
-        g.addColorStop( 0, '#f4a3a6' ); g.addColorStop( 0.5, '#e0707a' ); g.addColorStop( 1, '#b8384a' );
+        g.addColorStop( 0, '#eaf4fb' ); g.addColorStop( 0.5, '#d2e5f4' ); g.addColorStop( 1, '#b9d3e8' );
         x.fillStyle = g; x.fillRect( 0, 0, 1024, 1024 );
         const t = new THREE.CanvasTexture( c ); t.colorSpace = THREE.SRGBColorSpace; return t;
       } )();
@@ -99,8 +100,8 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
 
       // 마우스로 회전/팬은 가능하지만, 휠 확대축소는 막는다.
       const controls = new OrbitControls( camera, renderer.domElement );
-      controls.enableRotate = true;
-      controls.enablePan = true;
+      controls.enableRotate = false;
+      controls.enablePan = false;
       controls.enableZoom = false;
 
       // Object.html과 동일한 조명 - GLB 재질이 제대로 보이려면 이 정도의 전방위 조명이 필요하다.
