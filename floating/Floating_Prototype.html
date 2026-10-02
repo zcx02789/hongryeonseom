@@ -94,7 +94,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
 
       const renderer = new THREE.WebGLRenderer( { antialias: true } );
       // 3배 이상 고해상도 화면에서 픽셀 수가 너무 많아지지 않게 픽셀 비율을 2로 제한한다 (컴포저도 이 값을 따른다).
-      renderer.setPixelRatio( Math.min( window.devicePixelRatio, 2 ) );
+      renderer.setPixelRatio( Math.min( window.devicePixelRatio, 1.5 ) );
       renderer.setSize( window.innerWidth, window.innerHeight );
       document.body.appendChild( renderer.domElement );
 
@@ -239,7 +239,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         while ( clumps.length > count ) removeClumpAt( clumps.length - 1 );
       }
 
-      const params = { count: 170 };
+      const params = { count: window.innerWidth < 768 ? 60 : 110 };
 
       // 모델별(Skincare_1/2/3) 크기 배율.
       const sizeParams = { size1: 1, size2: 0.5, size3: 1 };
