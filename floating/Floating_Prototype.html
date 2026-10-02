@@ -11,7 +11,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Floating Clump</title>
     <style>
-      body { margin: 0; background: #d2e5f4; overflow: hidden; }
+      body { margin: 0; background: #e8f2fa; overflow: hidden; }
       #info {
         text-shadow: 0 1px 14px rgba(10,30,70,.45);
         position: fixed;
@@ -38,7 +38,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #d2e5f4;
+        background: #e8f2fa;
         font: 16px sans-serif;
         color: #333;
         z-index: 10;
@@ -82,7 +82,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         const c = document.createElement( 'canvas' ); c.width = 1024; c.height = 1024;
         const x = c.getContext( '2d' );
         const g = x.createRadialGradient( 512, 460, 40, 512, 512, 760 );
-        g.addColorStop( 0, '#eaf4fb' ); g.addColorStop( 0.5, '#d2e5f4' ); g.addColorStop( 1, '#b9d3e8' );
+        g.addColorStop( 0, '#ffffff' ); g.addColorStop( 0.5, '#e8f2fa' ); g.addColorStop( 1, '#cfe2f1' );
         x.fillStyle = g; x.fillRect( 0, 0, 1024, 1024 );
         const t = new THREE.CanvasTexture( c ); t.colorSpace = THREE.SRGBColorSpace; return t;
       } )();
@@ -105,7 +105,11 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
       controls.enableZoom = false;
 
       // Object.html과 동일한 조명 - GLB 재질이 제대로 보이려면 이 정도의 전방위 조명이 필요하다.
-      scene.add( new THREE.AmbientLight( 0xffffff, 0.6 ) );
+      scene.add( new THREE.AmbientLight( 0xdcecf8, 0.2 ) );
+      scene.add( new THREE.HemisphereLight( 0xcfe3f3, 0x6f8fa8, 0.35 ) );
+      const rim = new THREE.DirectionalLight( 0xbfdcf5, 1.0 );
+      rim.position.set( -3, 2, -3 );
+      scene.add( rim );
       const light = new THREE.DirectionalLight( 0xffffff, 2.5 );
       light.position.set( 2, 3, 2 );
       scene.add( light );
@@ -116,9 +120,18 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         scene.environment = pmremGenerator.fromEquirectangular( texture ).texture;
         texture.dispose();
       }
-      new EXRLoader().load( './env/studio_small_07_4k.exr', applyEnvironment );
+      {
+        const c = document.createElement( 'canvas' ); c.width = 512; c.height = 256;
+        const x = c.getContext( '2d' );
+        const gr = x.createLinearGradient( 0, 0, 0, 256 );
+        gr.addColorStop( 0, '#cfe3f3' ); gr.addColorStop( 0.5, '#8fb2cf' ); gr.addColorStop( 1, '#4f6f8a' );
+        x.fillStyle = gr; x.fillRect( 0, 0, 512, 256 );
+        x.fillStyle = 'rgba(255,255,255,.9)'; x.fillRect( 60, 40, 120, 30 ); x.fillRect( 330, 70, 100, 24 );
+        const t = new THREE.CanvasTexture( c ); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
+        applyEnvironment( t );
+      }
 
-      const hdriParams = { intensity: 0.1, rotationY: 214 };
+      const hdriParams = { intensity: 0.3, rotationY: 214 };
       scene.environmentIntensity = hdriParams.intensity;
       scene.environmentRotation.y = THREE.MathUtils.degToRad( hdriParams.rotationY );
 
@@ -177,6 +190,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
       ];
       const PRODUCT_TAGS = [ [ '#순한세안', '#촉촉마무리' ], [ '#결정리', '#간편패드' ], [ '#산뜻수분', '#데일리토너' ] ];
       PRODUCT_INFO.forEach( ( p, i ) => { p.tags = PRODUCT_TAGS[ i ]; } );
+      const waterUniforms = { uTime: { value: 0 }, uAmp: { value: 0 }, ext: 1 };
       const infoEl = document.getElementById( 'info' );
       const infoTitle = document.getElementById( 'info-title' );
       const infoDesc = document.getElementById( 'info-desc' );
@@ -238,14 +252,40 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         templates.forEach( ( template ) => {
           template.traverse( ( obj ) => {
             if ( obj.isMesh && obj.material.name === 'Water_Liquid' ) {
-              obj.material = new THREE.MeshBasicMaterial( {
-                color: 0xcaf7ff,
+              obj.material = new THREE.MeshPhysicalMaterial( {
+                color: 0xffffff,
+                metalness: 0,
+                roughness: 0.02,
                 transparent: true,
-                opacity: 0.16,
+                opacity: 0.22,
+                ior: 1.33,
+                clearcoat: 1,
+                clearcoatRoughness: 0,
+                specularIntensity: 1,
+                envMapIntensity: 4,
                 depthWrite: false,
                 side: THREE.FrontSide,
               } );
               obj.renderOrder = -1;
+              obj.geometry.computeBoundingBox();
+              const bb = obj.geometry.boundingBox, sz = bb.getSize( new THREE.Vector3() );
+              const ax = sz.y >= sz.x && sz.y >= sz.z ? 'y' : ( sz.x >= sz.z ? 'x' : 'z' );
+              const axisVec = new THREE.Vector3(); axisVec[ ax ] = 1;
+              const lo = bb.min[ ax ], hi = bb.max[ ax ], ext = hi - lo;
+              waterUniforms.ext = ext;
+              obj.material.onBeforeCompile = ( shader ) => {
+                shader.uniforms.uTime = waterUniforms.uTime;
+                shader.uniforms.uAmp = waterUniforms.uAmp;
+                shader.uniforms.uAxis = { value: axisVec };
+                shader.uniforms.uLo = { value: lo };
+                shader.uniforms.uExt = { value: ext };
+                shader.vertexShader = 'uniform float uTime;uniform float uAmp;uniform vec3 uAxis;uniform float uLo;uniform float uExt;\n' + shader.vertexShader.replace( '#include <begin_vertex>', `#include <begin_vertex>
+                  float wh = ( dot( position, uAxis ) - uLo ) / uExt;
+                  float wt = smoothstep( 0.55, 1.0, wh );
+                  float ww = sin( position.x * 9.0 / uExt + uTime * 2.6 ) + sin( position.z * 11.0 / uExt - uTime * 2.1 ) + sin( position.y * 7.0 / uExt + uTime * 1.7 );
+                  transformed += uAxis * wt * uAmp * ww;
+                  transformed += ( vec3( 1.0 ) - uAxis ) * wt * uAmp * 0.35 * ww;` );
+              };
             }
           } );
         } );
@@ -358,6 +398,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
 
       renderer.domElement.addEventListener( 'mousedown', ( event ) => {
         if ( event.button !== 0 || clumps.length === 0 ) return; // 왼쪽 버튼 + 오브젝트가 있을 때만 반응
+        if ( clock.elapsedTime < slowMotionEndTime || blurAmount > 0 ) return; // 효과 진행 중에는 중복 클릭 무시
 
         // 이전 클릭으로 날아가던/멈춰있던 오브젝트가 있으면 먼저 풀어준다.
         releaseCameraTarget();
@@ -487,6 +528,8 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
         const blurStep = rawDt / BLUR_FADE_SECONDS;
         blurAmount = blurAmount < blurTarget ? Math.min( blurAmount + blurStep, blurTarget ) : Math.max( blurAmount - blurStep, blurTarget );
         infoEl.style.opacity = blurAmount;
+        waterUniforms.uTime.value += rawDt;
+        waterUniforms.uAmp.value = waterUniforms.ext * ( 0.012 + 0.03 * blurAmount );
 
         if ( blurAmount > 0 && blurFocusClump ) {
           // 초점 거리는 카메라가 보는 방향 기준으로 선택한 오브젝트까지의 깊이로 맞춘다.
