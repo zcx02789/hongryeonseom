@@ -11,7 +11,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Floating Clump</title>
     <style>
-      body { margin: 0; background: #dfdfdf; overflow: hidden; }
+      body { margin: 0; background: #e0707a; overflow: hidden; }
       #info {
         position: fixed;
         left: clamp(24px, 6vw, 120px);
@@ -30,14 +30,14 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
       #info-eyebrow i { width: 36px; height: 1px; background: #fff; }
       #info-no { font-size: 14px; letter-spacing: .1em; }
       #info-tags { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
-      #info-tags span { background: #1f4fd8; color: #fff; font-size: clamp(14px, 1.2vw, 18px); font-weight: 600; padding: 7px 16px; }
+      #info-tags span { background: #4a1a22; color: #fff; font-size: clamp(14px, 1.2vw, 18px); font-weight: 600; padding: 7px 16px; }
       #loading {
         position: fixed;
         inset: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #dfdfdf;
+        background: #e0707a;
         font: 16px sans-serif;
         color: #333;
         z-index: 10;
@@ -46,7 +46,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
   </head>
   <body>
     <div id="loading">불러오는 중…</div>
-    <div id="info"><div id="info-eyebrow"><span id="info-no"></span><i></i>CINNABAR ISLAND</div><h2 id="info-title"></h2><p id="info-desc"></p><div id="info-tags"></div></div>
+    <div id="info"><div id="info-eyebrow"><span id="info-no"></span><i></i>HONGRYEON ISLAND</div><h2 id="info-title"></h2><p id="info-desc"></p><div id="info-tags"></div></div>
     <script type="importmap">
       {
         "imports": {
@@ -77,7 +77,14 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
       const COLLISION_GROUP_FLYING = 4;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color( '#d2e5f4' );
+      scene.background = (() => {
+        const c = document.createElement( 'canvas' ); c.width = 1024; c.height = 1024;
+        const x = c.getContext( '2d' );
+        const g = x.createRadialGradient( 512, 460, 40, 512, 512, 760 );
+        g.addColorStop( 0, '#f4a3a6' ); g.addColorStop( 0.5, '#e0707a' ); g.addColorStop( 1, '#b8384a' );
+        x.fillStyle = g; x.fillRect( 0, 0, 1024, 1024 );
+        const t = new THREE.CanvasTexture( c ); t.colorSpace = THREE.SRGBColorSpace; return t;
+      } )();
 
       // near를 너무 크게 두면 오브젝트가 카메라 가까이 왔을 때 근접 컷오프에 걸려 잘려
       // 보이거나 사라진다 - 카메라 보호 구를 바짝 줄여도 실제로는 이 경계에 막혀 있었다.
@@ -254,6 +261,7 @@ Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
 
         setClumpCount( params.count );
         document.getElementById( 'loading' ).style.display = 'none';
+        parent.postMessage( 'hero-ready', '*' );
       } );
 
       // 블랙홀로 모이는 중력 세기 - strength는 거리에 비례하는 계수, minPull은 중심 근처에서도
