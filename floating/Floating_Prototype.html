@@ -1,0 +1,511 @@
+<!--
+Clumping 예제(examples/Clumping/examples/object-clump, react-three/cannon 기반)의
+중심으로 뭉치는 물리 애니메이션을 순수 three.js + cannon-es로 이식한 버전.
+메쉬 데이터만 원본의 구(sphere) 40개 대신 Object.html에서 쓰던
+Skincare_1/2/3 GLB 모델로 교체했고, 개수는 170개로 고정이다.
+-->
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Floating Clump</title>
+    <style>
+      body { margin: 0; background: #dfdfdf; overflow: hidden; }
+      #info {
+        position: fixed;
+        left: clamp(24px, 6vw, 120px);
+        top: 50%;
+        transform: translateY(-50%);
+        width: min(420px, 38vw);
+        color: #fff;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 5;
+        font-family: 'Pretendard', 'Noto Sans KR', sans-serif;
+      }
+      #info h2 { margin: 0 0 22px; font-size: clamp(28px, 3.2vw, 52px); font-weight: 800; letter-spacing: -.03em; line-height: 1.2; text-shadow: 0 2px 24px rgba(10,30,90,.35); }
+      #info p { margin: 0; font-size: clamp(14px, 1.15vw, 18px); line-height: 1.8; word-break: keep-all; font-weight: 400; padding-top: 22px; border-top: 1px solid rgba(255,255,255,.5); }
+      #info-eyebrow { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; font-size: 12px; font-weight: 700; letter-spacing: .22em; }
+      #info-eyebrow i { width: 36px; height: 1px; background: #fff; }
+      #info-no { font-size: 14px; letter-spacing: .1em; }
+      #info-tags { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+      #info-tags span { background: #1f4fd8; color: #fff; font-size: clamp(14px, 1.2vw, 18px); font-weight: 600; padding: 7px 16px; }
+      #loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #dfdfdf;
+        font: 16px sans-serif;
+        color: #333;
+        z-index: 10;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="loading">불러오는 중…</div>
+    <div id="info"><div id="info-eyebrow"><span id="info-no"></span><i></i>CINNABAR ISLAND</div><h2 id="info-title"></h2><p id="info-desc"></p><div id="info-tags"></div></div>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./lib/three/three.module.js",
+          "three/addons/": "./lib/addons/",
+          "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/+esm"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+      import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+      import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+      import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+      import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+      import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+      import * as CANNON from 'cannon-es';
+
+      const rfs = THREE.MathUtils.randFloatSpread;
+      const CLUMP_RADIUS = 0.5;
+      // 충돌 필터 그룹 - 일반 오브젝트는 서로 부딪히고 카메라 보호 구에도 막히지만, 카메라로
+      // 날아가는 중인 오브젝트(FLYING)는 보호 구하고만 부딪히고 나머지 무리는 그냥 통과한다.
+      const COLLISION_GROUP_CLUMP = 1;
+      const COLLISION_GROUP_GUARD = 2;
+      const COLLISION_GROUP_FLYING = 4;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color( '#d2e5f4' );
+
+      // near를 너무 크게 두면 오브젝트가 카메라 가까이 왔을 때 근접 컷오프에 걸려 잘려
+      // 보이거나 사라진다 - 카메라 보호 구를 바짝 줄여도 실제로는 이 경계에 막혀 있었다.
+      const camera = new THREE.PerspectiveCamera( 35, window.innerWidth / window.innerHeight, 0.1, 40 );
+      camera.position.set( 0, 0, 19 );
+
+      const renderer = new THREE.WebGLRenderer( { antialias: true } );
+      // 3배 이상 고해상도 화면에서 픽셀 수가 너무 많아지지 않게 픽셀 비율을 2로 제한한다 (컴포저도 이 값을 따른다).
+      renderer.setPixelRatio( Math.min( window.devicePixelRatio, 2 ) );
+      renderer.setSize( window.innerWidth, window.innerHeight );
+      document.body.appendChild( renderer.domElement );
+
+      // 마우스로 회전/팬은 가능하지만, 휠 확대축소는 막는다.
+      const controls = new OrbitControls( camera, renderer.domElement );
+      controls.enableRotate = true;
+      controls.enablePan = true;
+      controls.enableZoom = false;
+
+      // Object.html과 동일한 조명 - GLB 재질이 제대로 보이려면 이 정도의 전방위 조명이 필요하다.
+      scene.add( new THREE.AmbientLight( 0xffffff, 0.6 ) );
+      const light = new THREE.DirectionalLight( 0xffffff, 2.5 );
+      light.position.set( 2, 3, 2 );
+      scene.add( light );
+
+      // HDRI 환경맵 - 배경색은 그대로 두고 오브젝트의 반사/조명에만 적용한다.
+      const pmremGenerator = new THREE.PMREMGenerator( renderer );
+      function applyEnvironment( texture ) {
+        scene.environment = pmremGenerator.fromEquirectangular( texture ).texture;
+        texture.dispose();
+      }
+      new EXRLoader().load( './env/studio_small_07_4k.exr', applyEnvironment );
+
+      const hdriParams = { intensity: 0.1, rotationY: 214 };
+      scene.environmentIntensity = hdriParams.intensity;
+      scene.environmentRotation.y = THREE.MathUtils.degToRad( hdriParams.rotationY );
+
+      // cannon-es 물리 월드 - 원본 Clump 데모와 동일하게 중력을 위쪽(+y)으로 살짝 준다.
+      const world = new CANNON.World( { gravity: new CANNON.Vec3( 0, 2, 0 ) } );
+      // sleep을 켜두면 구 경계 근처에서 속도가 잠깐 느려질 때 오브젝트가 통째로 잠들어버려서,
+      // 삭제 조건(거리)에 걸리기 직전 상태로 영원히 멈춰 보이는 버그가 생긴다. 그래서 꺼둔다.
+      world.allowSleep = false;
+      world.solver.iterations = 20;
+      // 기본 반발계수(restitution)가 0이 아니면 충돌할 때마다 살짝 튕겨나가는데,
+      // 중심으로 당기는 힘이 계속 다시 밀어붙여서 이 튕김이 끝없이 반복되며 떨림처럼 보인다.
+      world.defaultContactMaterial.restitution = 0;
+
+      // 구(블랙홀)가 마우스 커서를 따라가게 한다 - 커서를 카메라가 보는 방향에 수직인 평면에
+      // 투영해서 3D 위치를 구하고, 그 위치를 인력 계산의 중심으로 쓴다.
+      const blackHolePosition = new THREE.Vector3();
+      const blackHoleCannonPosition = new CANNON.Vec3();
+      const raycaster = new THREE.Raycaster();
+      const pointerNDC = new THREE.Vector2();
+      const dragPlane = new THREE.Plane();
+      const planeHit = new THREE.Vector3();
+      const cameraDirection = new THREE.Vector3();
+
+      window.addEventListener( 'pointermove', ( event ) => {
+        pointerNDC.x = ( event.clientX / window.innerWidth ) * 2 - 1;
+        pointerNDC.y = -( event.clientY / window.innerHeight ) * 2 + 1;
+      } );
+
+      // Object.html과 동일한 정규화 로직 - 가장 큰 변을 1로 맞추고 중심을 원점에 맞춘다.
+      function normalizeToUnitBox( object ) {
+        const box = new THREE.Box3().setFromObject( object );
+        const size = new THREE.Vector3();
+        const center = new THREE.Vector3();
+        box.getSize( size );
+        box.getCenter( center );
+        const maxDim = Math.max( size.x, size.y, size.z ) || 1;
+        object.position.sub( center );
+        object.quaternion.identity(); // GLB에 로컬 회전이 남아있어도 생성 시 항상 무회전으로 만든다.
+        const wrapper = new THREE.Group();
+        wrapper.scale.setScalar( 1 / maxDim );
+        wrapper.add( object );
+        return wrapper;
+      }
+
+      const modelUrls = [
+        './models/Skincare_1_Baking.glb',
+        './models/Skincare_2_Baking.glb',
+        './models/Skincare_3_Baking.glb',
+      ];
+      const SIZE_KEYS = [ 'size1', 'size2', 'size3' ]; // modelUrls와 같은 순서로 크기 배율에 대응
+      const loader = new GLTFLoader();
+      const PRODUCT_INFO = [
+        { title: '홍련섬 폼클렌저', desc: '제주 바다 위에 붉게 피어난 섬, 홍련섬. 그곳의 자연에서 찾은 순수한 에너지를 담아 피부를 깨끗하고 편안하게 가꿔주는 폼클렌저입니다. 부드럽고 풍성한 거품이 하루 동안 쌓인 노폐물과 메이크업 잔여물을 말끔하게 씻어내고, 세안 후에도 당기지 않고 촉촉한 피부로 마무리해줍니다. 제주 홍련 추출물과 화산 미네랄, 저자극 포뮬라로 매일 순하게 시작하는 세안을 경험해보세요.' },
+        { title: '홍련섬 토너패드', desc: '제주의 붉은 섬, 홍련섬의 맑은 기운을 한 장에 담았습니다. 수분을 가득 머금은 부드러운 패드가 세안 후 남은 피부 노폐물을 살포시 닦아내고, 거칠어진 피부결을 매끄럽게 정돈해줍니다. 제주 홍련 추출물이 지친 피부를 편안하게 달래주고, 화산 미네랄이 산뜻한 피부 컨디션을 도와줍니다. 바쁜 아침에도, 피부가 쉬어가고 싶은 저녁에도 간편하게 사용해보세요.' },
+        { title: '홍련섬 토너', desc: '붉은 섬 홍련섬의 자연이 전하는 맑고 깨끗한 수분을 담았습니다. 끈적임 없이 산뜻하게 스며드는 가벼운 텍스처가 세안 후 당기는 피부에 촉촉함을 채워주고, 다음 단계 스킨케어를 편안하게 받아들일 수 있도록 피부결을 정돈해줍니다. 제주 홍련 추출물과 저자극 포뮬라로 민감한 날에도 부담 없이 사용할 수 있는 데일리 토너입니다.' },
+      ];
+      const PRODUCT_TAGS = [ [ '#순한세안', '#촉촉마무리' ], [ '#결정리', '#간편패드' ], [ '#산뜻수분', '#데일리토너' ] ];
+      PRODUCT_INFO.forEach( ( p, i ) => { p.tags = PRODUCT_TAGS[ i ]; } );
+      const infoEl = document.getElementById( 'info' );
+      const infoTitle = document.getElementById( 'info-title' );
+      const infoDesc = document.getElementById( 'info-desc' );
+      const clumps = []; // { body, wrapper }
+      // 마우스 커서가 가리키는 오브젝트 - 클릭하면 이 오브젝트만 카메라 쪽으로 날아간다.
+      let hoveredClump = null;
+
+      function addClumpInstance( template ) {
+        // 초기 자세는 회전 없이 기본 자세로 생성한다 (quaternion 옵션을 안 주면 identity로 시작).
+        const body = new CANNON.Body( {
+          mass: 1,
+          shape: new CANNON.Sphere( CLUMP_RADIUS ),
+          angularDamping: 0.85, // 충돌로 생긴 회전이 빨리 죽도록 마찰을 세게 준다 (중앙에 뭉쳤을 때 어지럽지 않게)
+          linearDamping: 0.65,
+          position: new CANNON.Vec3( rfs( 20 ), rfs( 20 ), rfs( 20 ) ),
+          collisionFilterGroup: COLLISION_GROUP_CLUMP,
+          // 서로끼리(CLUMP)와 카메라 보호 구(GUARD)에는 부딪히되, 카메라로 날아가는 중인
+          // 오브젝트(FLYING)는 그냥 통과시킨다.
+          collisionFilterMask: COLLISION_GROUP_CLUMP | COLLISION_GROUP_GUARD,
+        } );
+        world.addBody( body );
+
+        const wrapper = normalizeToUnitBox( template.clone() );
+        // 모델별 크기 배율을 곱해준다 (기본 정규화 스케일 위에 추가로 곱함).
+        const templateIndex = templates.indexOf( template );
+        if ( templateIndex !== -1 ) wrapper.scale.multiplyScalar( sizeParams[ SIZE_KEYS[ templateIndex ] ] );
+        // 생성 직후 첫 렌더 프레임에 기본 위치(원점)/기본 자세(수직)로 한 프레임 보이는 걸 막기 위해
+        // 매 프레임 동기화를 기다리지 않고 스폰 위치/자세를 바로 반영해둔다.
+        wrapper.position.copy( body.position );
+        wrapper.quaternion.copy( body.quaternion );
+        scene.add( wrapper );
+
+        clumps.push( { body, wrapper, template } );
+      }
+
+      function removeClumpAt( index ) {
+        const [ clump ] = clumps.splice( index, 1 );
+        world.removeBody( clump.body );
+        scene.remove( clump.wrapper );
+      }
+
+      let templates = [];
+
+      function setClumpCount( count ) {
+        while ( clumps.length < count ) addClumpInstance( templates[ clumps.length % templates.length ] );
+        while ( clumps.length > count ) removeClumpAt( clumps.length - 1 );
+      }
+
+      const params = { count: 170 };
+
+      // 모델별(Skincare_1/2/3) 크기 배율.
+      const sizeParams = { size1: 1, size2: 0.5, size3: 1 };
+
+      Promise.all( modelUrls.map( ( url ) => loader.loadAsync( url ) ) ).then( ( results ) => {
+        templates = results.map( ( gltf ) => gltf.scene );
+
+        // Object.html과 동일하게 Skincare_3의 Water_Liquid 재질을 옅은 투명 색으로 바꾼다.
+        // (원본 재질은 환경맵 반사에 의존해서 환경맵이 없는 이 씬에서는 검게 보인다.)
+        templates.forEach( ( template ) => {
+          template.traverse( ( obj ) => {
+            if ( obj.isMesh && obj.material.name === 'Water_Liquid' ) {
+              obj.material = new THREE.MeshBasicMaterial( {
+                color: 0xcaf7ff,
+                transparent: true,
+                opacity: 0.16,
+                depthWrite: false,
+                side: THREE.FrontSide,
+              } );
+              obj.renderOrder = -1;
+            }
+          } );
+        } );
+
+        // Skincare_2가 GLB에서 옆으로 누운 채로 들어와서 90도 돌려 세운다. 각 메쉬 지오메트리를
+        // 따로 돌리면 메쉬끼리의 상대 위치가 깨지므로, 원본 전체를 감싸는 그룹을 하나 만들고
+        // 그 안쪽 자식에만 회전을 준다 - normalizeToUnitBox가 매번 초기화하는 건 바깥쪽
+        // 래퍼(클론 대상)의 quaternion뿐이라, 안쪽 자식의 회전은 그대로 유지된다.
+        const skincare2Original = templates[ 1 ];
+        const skincare2Wrapper = new THREE.Group();
+        skincare2Wrapper.add( skincare2Original );
+        skincare2Original.rotation.x = Math.PI / 2;
+        templates[ 1 ] = skincare2Wrapper;
+
+        setClumpCount( params.count );
+        document.getElementById( 'loading' ).style.display = 'none';
+      } );
+
+      // 블랙홀로 모이는 중력 세기 - strength는 거리에 비례하는 계수, minPull은 중심 근처에서도
+      // 당기는 힘이 0에 가까워져 멈춰 보이지 않도록 까는 최소 인력이다. 둘 다 세게 줘서
+      // 중앙에서 오브젝트끼리 거리가 좁아지고 구처럼 단단하게 뭉치게 한다.
+      const gravityParams = { strength: 4 * 0.75, minPull: 3 * 0.75 };
+
+      // 충돌로 생기는 회전 속도 상한 - 중앙에 많이 뭉쳤을 때 회전이 너무 심해서 어지러운 걸 막는다.
+      const rotationParams = { maxAngularSpeed: 1.25 };
+
+      // 카메라 보호 구 - 실제 리지드바디라서 오브젝트가 이 반경 안으로 물리적으로 들어올 수
+      // 없다(카메라에 너무 가까이 붙어서 오브젝트 안쪽이 보이는 클리핑을 막는 용도). 카메라
+      // 위치를 매 프레임 따라다닌다. 눈에 보이는 표시는 없다.
+      const cameraGuardParams = { radius: 1.5 };
+      const cameraGuardBody = new CANNON.Body( {
+        mass: 0,
+        type: CANNON.Body.KINEMATIC,
+        shape: new CANNON.Sphere( cameraGuardParams.radius ),
+        collisionFilterGroup: COLLISION_GROUP_GUARD,
+        collisionFilterMask: COLLISION_GROUP_CLUMP | COLLISION_GROUP_FLYING,
+      } );
+      world.addBody( cameraGuardBody );
+
+      const spreadParams = { strength: 26 };
+
+      // 선택된 오브젝트는 카메라를 향하는 방향으로 그대로(방향 변환 없이) 날아간다(다른
+      // 오브젝트와 같은 속력). 별도의 정지 스크립트는 없고, 위 카메라 보호 구에 실제로
+      // 부딪혀 멈추고, 계속 걸려있는 중력을 그대로 받아서 자연스럽게 다시 끌려간다.
+      const flybyParams = { speedMultiplier: 1.8 };
+
+      window.addEventListener( 'resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        composer.setSize( window.innerWidth, window.innerHeight );
+      } );
+
+      // 클릭해서 퍼진 뒤 delay초가 지나면(=퍼짐이 끝나갈 무렵, 시작 직후가 아니라) 화면 전체가
+      // duration초 동안 슬로우 모션에 걸린다. 개별 오브젝트가 아니라 물리 시뮬레이션에 넘기는
+      // dt 자체를 scale만큼 줄여서, 진짜로 "시간이 느리게 흐르는" 것처럼 전부 다 같이 느려진다.
+      // duration이 지나면 정상 dt로 돌아가고, 항상 걸려있는 인력 덕분에 자연스럽게 다시 모인다.
+      const slowMotionParams = { delay: 0.3, scale: 0.1, duration: 1.5 };
+      let slowMotionStartTime = 0;
+      let slowMotionEndTime = 0;
+
+      // 슬로우모션 중 선택한 오브젝트(flyingCameraTarget)만 또렷하게 두고 나머지는 흐리게 만드는
+      // 심도(DOF) 블러. 블러가 필요한 순간에만 composer로 그리고, 평소엔 기존 renderer.render를 쓴다.
+      // 켜지고 꺼질 때는 blurAmount(0~1)를 BLUR_FADE_SECONDS에 걸쳐 서서히 움직여 페이드 인/아웃한다.
+      const BLUR_FADE_SECONDS = 0.4;
+      const blurParams = { enabled: true, aperture: 0.02, maxblur: 0.01 };
+      let blurAmount = 0;
+      let blurFocusClump = null; // 페이드 아웃 중에도 초점을 유지하려고 마지막 선택 오브젝트를 기억한다.
+      const focusOffset = new THREE.Vector3();
+      const focusBox = new THREE.Box3();
+      const focusBoxSize = new THREE.Vector3();
+      const composer = new EffectComposer( renderer );
+      composer.addPass( new RenderPass( scene, camera ) );
+      const bokehPass = new BokehPass( scene, camera, { focus: 10, aperture: blurParams.aperture, maxblur: blurParams.maxblur } );
+      composer.addPass( bokehPass );
+      // 기본 BokehShader는 초점 깊이와 조금만 달라도 바로 블러가 걸려서, 선택한 오브젝트 자신의
+      // 앞면/뒷면(중심 깊이와 반지름만큼 차이)까지 흐려진다. 오브젝트 반지름(focusRange)
+      // 안쪽 깊이 차이는 블러 계산에서 제외하는 불감대를 셰이더에 추가한다.
+      bokehPass.uniforms[ 'focusRange' ] = { value: 0 };
+      bokehPass.materialBokeh.fragmentShader = bokehPass.materialBokeh.fragmentShader
+        .replace( 'uniform float focus;', 'uniform float focus;\nuniform float focusRange;' )
+        .replace( 'float factor = ( focus + viewZ );', 'float factor = ( focus + viewZ );\n\t\t\tfactor = sign( factor ) * max( abs( factor ) - focusRange, 0.0 );' );
+      composer.addPass( new OutputPass() );
+
+      const DIM_OPACITY = 0.6;
+      const dimScene = new THREE.Scene();
+      const dimCamera = new THREE.OrthographicCamera( -1, 1, 1, -1, 0, 1 );
+      const dimMaterial = new THREE.MeshBasicMaterial( { color: 0x000000, transparent: true, opacity: 0, depthTest: false, depthWrite: false } );
+      dimScene.add( new THREE.Mesh( new THREE.PlaneGeometry( 2, 2 ), dimMaterial ) );
+
+      // 왼쪽 클릭하면: 전부 각자 블랙홀 기준 자기 위치 방향(=이미 사방에 흩어진 방향)으로 사방에
+      // 퍼지고, 그중 마우스로 선택해둔 오브젝트(hoveredClump)만 따로 카메라
+      // 방향으로 날려보낸다. delay초 뒤(퍼짐이 끝나갈 무렵)부터 위 슬로우모션이 시작된다.
+      const explodeDir = new CANNON.Vec3();
+      let flyingCameraTarget = null; // 지금 카메라 쪽으로 날아가고 있는/보호 구에 막혀있는 오브젝트
+
+      function launch( clump, direction, speedMultiplier = 1 ) {
+        const speed = spreadParams.strength * speedMultiplier;
+        clump.body.velocity.set( direction.x * speed, direction.y * speed, direction.z * speed );
+      }
+
+      // 카메라로 날아갔던 오브젝트의 충돌 필터를 원래대로(무리와 다시 부딪히게) 되돌린다.
+      function releaseCameraTarget() {
+        if ( ! flyingCameraTarget ) return;
+        flyingCameraTarget.body.collisionFilterGroup = COLLISION_GROUP_CLUMP;
+        flyingCameraTarget.body.collisionFilterMask = COLLISION_GROUP_CLUMP | COLLISION_GROUP_GUARD;
+        flyingCameraTarget = null;
+      }
+
+      renderer.domElement.addEventListener( 'mousedown', ( event ) => {
+        if ( event.button !== 0 || clumps.length === 0 ) return; // 왼쪽 버튼 + 오브젝트가 있을 때만 반응
+
+        // 이전 클릭으로 날아가던/멈춰있던 오브젝트가 있으면 먼저 풀어준다.
+        releaseCameraTarget();
+
+        // 카메라 쪽으로 따로 날려보낼 오브젝트는 마우스로 선택해둔 것 하나뿐이다.
+        const cameraTarget = hoveredClump;
+
+        // 나머지는 전부 각자 블랙홀 기준 자기 위치 방향(=이미 사방에 흩어진 방향)으로 퍼진다.
+        for ( const clump of clumps ) {
+          if ( clump === cameraTarget ) continue;
+          clump.body.position.vsub( blackHoleCannonPosition, explodeDir );
+          if ( explodeDir.lengthSquared() === 0 ) explodeDir.set( Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5 );
+          explodeDir.normalize();
+          launch( clump, explodeDir );
+        }
+
+        // 선택된 오브젝트가 있을 때만, 지금 오브젝트 위치에서 카메라를 향하는 방향으로 정확히
+        // 날려보낸다. DYNAMIC 상태를 그대로 유지하되, 충돌 필터를 바꿔서 나머지 무리는 그냥
+        // 통과하고 카메라 보호 구에만 실제로 부딪히게 한다 - 거기 부딪혀 멈춘 뒤에도 중력은
+        // 계속 받으니 스크립트로 얼리는 것 없이 자연스럽게 다시 끌려간다.
+        if ( cameraTarget ) {
+          const objX = cameraTarget.body.position.x, objY = cameraTarget.body.position.y, objZ = cameraTarget.body.position.z;
+          const toCameraX = camera.position.x - objX;
+          const toCameraY = camera.position.y - objY;
+          const toCameraZ = camera.position.z - objZ;
+          const toCameraLen = Math.hypot( toCameraX, toCameraY, toCameraZ ) || 1;
+          explodeDir.set( toCameraX / toCameraLen, toCameraY / toCameraLen, toCameraZ / toCameraLen );
+
+          launch( cameraTarget, explodeDir, flybyParams.speedMultiplier ); // spreadParams.strength에 배율을 곱한 속도로 날아간다.
+          cameraTarget.body.collisionFilterGroup = COLLISION_GROUP_FLYING;
+          cameraTarget.body.collisionFilterMask = COLLISION_GROUP_GUARD;
+          flyingCameraTarget = cameraTarget;
+          const info = PRODUCT_INFO[ templates.indexOf( cameraTarget.template ) ];
+          if ( info ) {
+            infoTitle.textContent = info.title; infoDesc.textContent = info.desc;
+            document.getElementById( 'info-no' ).textContent = '0' + ( templates.indexOf( cameraTarget.template ) + 1 );
+            document.getElementById( 'info-tags' ).innerHTML = info.tags.map( ( t ) => '<span>' + t + '</span>' ).join( '' );
+          }
+        }
+
+        slowMotionStartTime = clock.elapsedTime + slowMotionParams.delay;
+        slowMotionEndTime = slowMotionStartTime + slowMotionParams.duration;
+      } );
+
+      const forceVec = new CANNON.Vec3();
+      const offsetVec = new CANNON.Vec3(); // 블랙홀 위치 기준 상대 벡터
+      const clock = new THREE.Clock();
+
+      // 블랙홀 방향으로 끌어당기는 중력을 body에 건다. 거리에 비례하는 스프링 힘(gravityParams.strength)에
+      // 최소 인력(gravityParams.minPull)을 더해서, 블랙홀 근처라고 힘이 0에 가까워져 멈춰 보이는 일
+      // 없이 끝까지 계속 빨려들어가게 한다.
+      function applyGravity( body ) {
+        body.position.vsub( blackHoleCannonPosition, offsetVec );
+        const distance = offsetVec.length();
+        forceVec.copy( offsetVec );
+        if ( distance > 0 ) forceVec.scale( 1 / distance, forceVec ); // 방향 벡터로 정규화
+        forceVec.scale( -( gravityParams.strength * distance + gravityParams.minPull ), forceVec );
+        body.applyForce( forceVec, body.position );
+      }
+
+      renderer.setAnimationLoop( () => {
+        const rawDt = Math.min( clock.getDelta(), 0.1 );
+        // 슬로우모션 중이면 물리에 넘길 dt 자체를 줄인다 - fixedTimeStep도 dt에 맞춰서 한 번에
+        // 정확히 한 스텝만 돌게 해야, dt가 아주 작아졌을 때 cannon의 내부 누적 스텝핑 때문에
+        // 몇 프레임씩 안 움직이다 뚝뚝 끊겨 움직이는 대신 매 프레임 매끄럽게 조금씩 움직인다.
+        const inSlowMotion = clock.elapsedTime >= slowMotionStartTime && clock.elapsedTime < slowMotionEndTime;
+        const dt = inSlowMotion ? rawDt * slowMotionParams.scale : rawDt;
+
+        // 구(블랙홀)를 마우스 커서 위치로 옮긴다 - 카메라가 보는 방향에 수직이고 블랙홀의
+        // 현재 위치를 지나는 평면에 커서를 투영해서 3D 좌표를 구한다.
+        // 슬로우모션 중에는 커서를 따라가지 않고 그 자리에 멈춰 있는다.
+        camera.getWorldDirection( cameraDirection );
+        dragPlane.setFromNormalAndCoplanarPoint( cameraDirection, blackHolePosition );
+        raycaster.setFromCamera( pointerNDC, camera );
+        if ( ! inSlowMotion && raycaster.ray.intersectPlane( dragPlane, planeHit ) ) {
+          blackHolePosition.copy( planeHit );
+        }
+        blackHoleCannonPosition.set( blackHolePosition.x, blackHolePosition.y, blackHolePosition.z );
+
+        // 카메라 보호 구도 카메라를 따라다니게 위치를 갱신한다.
+        cameraGuardBody.position.set( camera.position.x, camera.position.y, camera.position.z );
+
+        // 커서가 가리키는 오브젝트를 찾는다. 광선과의 수직 거리만 보면 빽빽하게
+        // 뭉친 무리 속에서 실제로는 뒤에 가려진 오브젝트가 뽑힐 수 있어서, 광선이 반경 안을
+        // 지나가는 오브젝트들 중 카메라에서 가장 가까운(=화면에서 제일 앞에 보이는) 것을 고른다.
+        // 카메라로 날아가는/멈춰있는 오브젝트는 후보에서 뺀다.
+        let closestHoverClump = null;
+        let closestHoverDepth = Infinity;
+        for ( const clump of clumps ) {
+          if ( clump === flyingCameraTarget ) continue;
+          const perpDist = raycaster.ray.distanceToPoint( clump.wrapper.position );
+          if ( perpDist >= CLUMP_RADIUS ) continue;
+          const depth = raycaster.ray.origin.distanceTo( clump.wrapper.position );
+          if ( depth < closestHoverDepth ) {
+            closestHoverDepth = depth;
+            closestHoverClump = clump;
+          }
+        }
+        hoveredClump = closestHoverClump;
+
+        // 카메라로 날아간 오브젝트도 다른 오브젝트와 똑같이 계속 중력을 받는다 - 카메라
+        // 보호 구에 실제로 부딪혀 멈추고(충돌 필터 덕분에 무리는 그냥 통과), 그 뒤로도
+        // 걸려있는 중력 때문에 자연스럽게 다시 끌려간다. 별도의 정지/대기 스크립트는 없다.
+        for ( const clump of clumps ) applyGravity( clump.body );
+
+        // Clock의 첫 getDelta()는 0을 돌려주는데, cannon은 dt가 0이면 내부 누적 시간이 NaN이 되어
+        // 그 뒤로 물리가 영영 멈춘다. 그래서 dt가 0보다 클 때만 스텝을 돌린다.
+        if ( dt > 0 ) world.step( dt, dt, 1 );
+
+        // 충돌로 인한 회전 에너지가 감쇠보다 빠르게 쌓이는 경우를 대비해 각속도 상한선을 강제로 건다.
+        for ( const clump of clumps ) {
+          const angularSpeed = clump.body.angularVelocity.length();
+          if ( angularSpeed > rotationParams.maxAngularSpeed ) {
+            clump.body.angularVelocity.scale( rotationParams.maxAngularSpeed / angularSpeed, clump.body.angularVelocity );
+          }
+        }
+
+        for ( const { body, wrapper } of clumps ) {
+          wrapper.position.copy( body.position );
+          wrapper.quaternion.copy( body.quaternion );
+        }
+
+        controls.update();
+
+        const blurTarget = blurParams.enabled && inSlowMotion && flyingCameraTarget ? 1 : 0;
+        if ( blurTarget === 1 ) blurFocusClump = flyingCameraTarget;
+        const blurStep = rawDt / BLUR_FADE_SECONDS;
+        blurAmount = blurAmount < blurTarget ? Math.min( blurAmount + blurStep, blurTarget ) : Math.max( blurAmount - blurStep, blurTarget );
+        infoEl.style.opacity = blurAmount;
+
+        if ( blurAmount > 0 && blurFocusClump ) {
+          // 초점 거리는 카메라가 보는 방향 기준으로 선택한 오브젝트까지의 깊이로 맞춘다.
+          camera.getWorldDirection( cameraDirection );
+          focusOffset.copy( blurFocusClump.wrapper.position ).sub( camera.position );
+          bokehPass.uniforms[ 'focus' ].value = focusOffset.dot( cameraDirection );
+          focusBox.setFromObject( blurFocusClump.wrapper ).getSize( focusBoxSize );
+          bokehPass.uniforms[ 'focusRange' ].value = focusBoxSize.length() / 2;
+          bokehPass.uniforms[ 'aperture' ].value = blurParams.aperture * blurAmount;
+          bokehPass.uniforms[ 'maxblur' ].value = blurParams.maxblur * blurAmount;
+          composer.render();
+
+          dimMaterial.opacity = DIM_OPACITY * blurAmount;
+          const prevBackground = scene.background;
+          const hidden = [];
+          for ( const c of clumps ) if ( c !== blurFocusClump && c.wrapper.visible ) { c.wrapper.visible = false; hidden.push( c ); }
+          renderer.autoClear = false;
+          renderer.render( dimScene, dimCamera );
+          renderer.clearDepth();
+          scene.background = null;
+          renderer.render( scene, camera );
+          scene.background = prevBackground;
+          renderer.autoClear = true;
+          for ( const c of hidden ) c.wrapper.visible = true;
+        } else {
+          renderer.render( scene, camera );
+        }
+      } );
+    </script>
+  </body>
+</html>
